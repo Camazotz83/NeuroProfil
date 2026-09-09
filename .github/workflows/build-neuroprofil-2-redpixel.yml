@@ -1,0 +1,66 @@
+name: NeuroProfil 2.0 — Red Pixel APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract NeuroProfil 2 project
+        run: |
+          rm -rf neuroprofil2
+          mkdir neuroprofil2
+          unzip -q NeuroProfil_2_0_RedPixel_Android.zip -d neuroprofil2
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK
+        run: sdkmanager "platforms;android-34" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build release APK
+        run: gradle -p neuroprofil2 clean :app:assembleRelease --no-daemon
+
+      - name: Verify and prepare APK
+        run: |
+          cp neuroprofil2/app/build/outputs/apk/release/app-release.apk NeuroProfil-2.0.0-RedPixel.apk
+          "$ANDROID_HOME/build-tools/35.0.0/aapt2" dump badging NeuroProfil-2.0.0-RedPixel.apk | head -30
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose NeuroProfil-2.0.0-RedPixel.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NeuroProfil-2.0.0-RedPixel-APK
+          path: NeuroProfil-2.0.0-RedPixel.apk
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v2.0.0-redpixel
+          name: NeuroProfil 2.0.0 — Red Pixel Edition
+          body: |
+            Major interface redesign with Miauschka as the red-pixel app icon.
+            Graphite / warm-ivory / crimson visual system.
+            Clear Merkmale / Kontext / Auswertung navigation.
+            Revised clinical layer and PDF report presentation.
+            Uses a separate Android application ID so it can coexist with the old test build.
+          files: NeuroProfil-2.0.0-RedPixel.apk
