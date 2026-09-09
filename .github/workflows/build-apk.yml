@@ -1,0 +1,59 @@
+name: Build NeuroProfil APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract Android project
+        run: |
+          rm -rf android-project
+          mkdir android-project
+          unzip -q NeuroProfil_Android_Projekt.zip -d android-project
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 35
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build APK
+        run: gradle -p android-project :app:assembleRelease
+
+      - name: Prepare APK
+        run: cp android-project/app/build/outputs/apk/release/app-release.apk NeuroProfil-1.0.0.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NeuroProfil-Android-APK
+          path: NeuroProfil-1.0.0.apk
+
+      - name: Create downloadable release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0
+          name: NeuroProfil 1.0.0
+          files: NeuroProfil-1.0.0.apk
