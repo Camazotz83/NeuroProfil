@@ -1,0 +1,104 @@
+name: Build NeuroProfil APK 1.0.1 Compatibility
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract Android project
+        run: |
+          rm -rf android-project
+          mkdir android-project
+          unzip -q NeuroProfil_Android_Projekt.zip -d android-project
+
+      - name: Patch for Android 14 compatibility
+        run: |
+          sed -i 's/compileSdk 35/compileSdk 34/' android-project/app/build.gradle
+          sed -i "s/targetSdk 35/targetSdk 34/" android-project/app/build.gradle
+          sed -i "s/versionCode 1/versionCode 2/" android-project/app/build.gradle
+          sed -i "s/versionName '1.0.0'/versionName '1.0.1'/" android-project/app/build.gradle
+          cat android-project/app/build.gradle
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK and build tools
+        run: sdkmanager "platforms;android-34" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build release APK
+        run: gradle -p android-project :app:assembleRelease
+
+      - name: Create dedicated signing key
+        run: |
+          keytool -genkeypair -v \
+            -keystore neuroprofil-release.jks \
+            -alias neuroprofil \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass neuroprofil123 \
+            -keypass neuroprofil123 \
+            -dname "CN=NeuroProfil, OU=Android, O=NeuroProfil, L=Osnabrueck, C=DE"
+
+      - name: Zipalign and sign with V1 + V2 + V3
+        run: |
+          BT="$ANDROID_HOME/build-tools/35.0.0"
+          "$BT/zipalign" -f -p 4 \
+            android-project/app/build/outputs/apk/release/app-release.apk \
+            NeuroProfil-1.0.1-aligned.apk
+          "$BT/apksigner" sign \
+            --ks neuroprofil-release.jks \
+            --ks-key-alias neuroprofil \
+            --ks-pass pass:neuroprofil123 \
+            --key-pass pass:neuroprofil123 \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            --v4-signing-enabled false \
+            --out NeuroProfil-1.0.1.apk \
+            NeuroProfil-1.0.1-aligned.apk
+
+      - name: Verify APK package and signatures
+        run: |
+          BT="$ANDROID_HOME/build-tools/35.0.0"
+          "$BT/zipalign" -c -v 4 NeuroProfil-1.0.1.apk
+          "$BT/apksigner" verify --verbose --print-certs NeuroProfil-1.0.1.apk
+          "$BT/aapt2" dump badging NeuroProfil-1.0.1.apk | head -30
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NeuroProfil-Android-APK-1.0.1
+          path: NeuroProfil-1.0.1.apk
+
+      - name: Create downloadable release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.1
+          name: NeuroProfil 1.0.1
+          body: |
+            Android-14 compatibility build.
+            Explicit APK Signature Scheme V1 + V2 + V3; package and zip alignment verified during CI.
+          files: NeuroProfil-1.0.1.apk
