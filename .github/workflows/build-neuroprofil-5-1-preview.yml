@@ -1,0 +1,87 @@
+name: NeuroProfil 5.1 — Preview APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Extract project
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf neuroprofil51
+          mkdir neuroprofil51
+          unzip -q NeuroProfil_5_1_Accessible_Android.zip -d neuroprofil51
+          test -f neuroprofil51/app/build.gradle
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Prepare Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then SDKMANAGER="$(command -v sdkmanager)"; fi
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+          echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+          echo "$SDK_ROOT/build-tools/36.0.0" >> "$GITHUB_PATH"
+          echo "$SDK_ROOT/emulator" >> "$GITHUB_PATH"
+
+      - uses: gradle/actions/setup-gradle@v5
+        with:
+          gradle-version: '8.13'
+
+      - name: Build debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle -p neuroprofil51 clean :app:assembleDebug --no-daemon --stacktrace
+          cp neuroprofil51/app/build/outputs/apk/debug/app-debug.apk NeuroProfil-5.1.0-preview.apk
+
+      - name: Inspect APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging NeuroProfil-5.1.0-preview.apk | tee badging.txt
+          grep -q "package: name='de.neuroprofil.clinicalmatrix.debug'" badging.txt
+          grep -q "targetSdkVersion:'36'" badging.txt
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Android 16 install + launch test
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          disable-animations: true
+          script: |
+            set -eu
+            /usr/local/lib/android/sdk/platform-tools/adb wait-for-device
+            /usr/local/lib/android/sdk/platform-tools/adb install -r NeuroProfil-5.1.0-preview.apk
+            /usr/local/lib/android/sdk/platform-tools/adb shell pm path de.neuroprofil.clinicalmatrix.debug
+            /usr/local/lib/android/sdk/platform-tools/adb shell am start -W -n de.neuroprofil.clinicalmatrix.debug/de.neuroprofil.app.MainActivity
+            sleep 4
+            /usr/local/lib/android/sdk/platform-tools/adb shell pidof de.neuroprofil.clinicalmatrix.debug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NeuroProfil-5.1.0-preview-APK
+          path: NeuroProfil-5.1.0-preview.apk
+          if-no-files-found: error
